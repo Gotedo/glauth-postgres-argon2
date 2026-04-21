@@ -2,19 +2,82 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
+	"net"
+	"strings"
 
+	"github.com/alexedwards/argon2id"
 	_ "github.com/lib/pq"
 
 	"github.com/glauth/glauth/v2/pkg/handler"
-	"github.com/glauth/glauth/v2/pkg/plugins"
+	"github.com/nmcclain/ldap"
 )
 
-type PostgresBackend struct {
+type PostgresBackend struct{}
+
+type Argon2PostgresHandler struct {
+	handler.Handler // embed the standard DB handler (search, groups, etc.)
+	db              *sql.DB
 }
 
+func (h *Argon2PostgresHandler) Bind(bindDN, bindSimplePw string, conn net.Conn) (ldap.LDAPResultCode, error) {
+	// Extract username from DN (same logic you had)
+	firstRDN := strings.SplitN(bindDN, ",", 2)[0]
+	parts := strings.SplitN(firstRDN, "=", 2)
+
+	username := bindDN
+	if len(parts) == 2 {
+		username = strings.TrimSpace(parts[1])
+	} else {
+		username = strings.TrimSpace(username)
+	}
+
+	if username == "" {
+		return ldap.LDAPResultInvalidCredentials, fmt.Errorf("invalid DN format")
+	}
+
+	var dbHash string
+	err := h.db.QueryRow(`
+        SELECT passbcrypt 
+        FROM users 
+        WHERE name = $1 OR mail = $1`, username, username).Scan(&dbHash)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return ldap.LDAPResultInvalidCredentials, fmt.Errorf("invalid credentials")
+		}
+		return ldap.LDAPResultOperationsError, err
+	}
+
+	match, err := argon2id.ComparePasswordAndHash(bindSimplePw, dbHash)
+	if err != nil || !match {
+		return ldap.LDAPResultInvalidCredentials, fmt.Errorf("invalid credentials")
+	}
+
+	return ldap.LDAPResultSuccess, nil
+}
+
+// NewPostgresHandler is the entry point glauth calls (as configured in your .cfg file)
 func NewPostgresHandler(opts ...handler.Option) handler.Handler {
 	backend := PostgresBackend{}
-	return plugins.NewDatabaseHandler(backend, opts...)
+
+	// This gives us the full standard database handler (search, schema, groups, etc.)
+	stdHandler := NewDatabaseHandler(backend, opts...)
+
+	// We also open our own DB connection so the custom Bind can use Argon2
+	configOpts := handler.Options{}
+	for _, opt := range opts {
+		opt(&configOpts)
+	}
+
+	db, err := sql.Open(backend.GetDriverName(), configOpts.Backend.Database)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to open postgres connection for Argon2 handler: %v", err))
+	}
+
+	return &Argon2PostgresHandler{
+		Handler: stdHandler,
+		db:      db,
+	}
 }
 
 func (b PostgresBackend) GetDriverName() string {
