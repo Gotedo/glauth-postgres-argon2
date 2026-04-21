@@ -1,24 +1,54 @@
-# Note: to make a plugin compatible with a binary built in debug mode, add `-gcflags='all=-N -l'`
+# ================================================
+# Argon2-Postgres plugin Makefile
+# ================================================
 
-PLUGIN_OS ?= linux
-PLUGIN_ARCH ?= amd64
+# Add this if you ever build glauth itself in debug mode:
+# TRIM_FLAGS += -gcflags='all=-N -l'
 
-plugin_postgres: bin/$(PLUGIN_OS)$(PLUGIN_ARCH)/postgres.so
+# Default to the CURRENT host OS and architecture
+PLUGIN_OS   ?= $(shell go env GOOS)
+PLUGIN_ARCH ?= $(shell go env GOARCH)
+PLUGIN_NAME  = argon2-postgres
 
-bin/$(PLUGIN_OS)$(PLUGIN_ARCH)/postgres.so: pkg/plugins/glauth-postgres/postgres.go
-	GOOS=$(PLUGIN_OS) GOARCH=$(PLUGIN_ARCH) go build ${TRIM_FLAGS} -ldflags "${BUILD_VARS}" -buildmode=plugin -o $@ $^
+OUT_DIR = bin/$(PLUGIN_OS)_$(PLUGIN_ARCH)
 
-plugin_postgres_linux_amd64:
-	PLUGIN_OS=linux PLUGIN_ARCH=amd64 make plugin_postgres
+# Official-style flags (same as glauth-postgres)
+TRIM_FLAGS ?= -trimpath
+BUILD_VARS ?=
 
-plugin_postgres_linux_arm64:
-	PLUGIN_OS=linux PLUGIN_ARCH=arm64 make plugin_postgres
+.PHONY: plugin plugin_linux_amd64 plugin_linux_arm64 plugin_darwin_amd64 plugin_darwin_arm64 release
 
-plugin_postgres_darwin_amd64:
-	PLUGIN_OS=darwin PLUGIN_ARCH=amd64 make plugin_postgres
+plugin: $(OUT_DIR)/$(PLUGIN_NAME).so
 
-plugin_postgres_darwin_arm64:
-	PLUGIN_OS=darwin PLUGIN_ARCH=arm64 make plugin_postgres
+$(OUT_DIR)/$(PLUGIN_NAME).so: *.go
+	mkdir -p $(OUT_DIR)
+	CGO_ENABLED=1 GOOS=$(PLUGIN_OS) GOARCH=$(PLUGIN_ARCH) \
+	go build \
+		${TRIM_FLAGS} \
+		-ldflags "${BUILD_VARS}" \
+		-buildmode=plugin \
+		-o $@ *.go
 
-release-glauth-postgres:
-	@P=postgres M=pkg/plugins/glauth-postgres make releaseplugin
+plugin_linux_amd64:
+	PLUGIN_OS=linux PLUGIN_ARCH=amd64 $(MAKE) plugin
+
+plugin_linux_arm64:
+	PLUGIN_OS=linux PLUGIN_ARCH=arm64 $(MAKE) plugin
+
+plugin_darwin_amd64:
+	PLUGIN_OS=darwin PLUGIN_ARCH=amd64 $(MAKE) plugin
+
+plugin_darwin_arm64:
+	PLUGIN_OS=darwin PLUGIN_ARCH=arm64 $(MAKE) plugin
+
+release:
+	@echo "=== Building Argon2-Postgres plugin for all platforms ==="
+	@$(MAKE) plugin_linux_amd64
+	@$(MAKE) plugin_linux_arm64
+	@$(MAKE) plugin_darwin_amd64
+	@$(MAKE) plugin_darwin_arm64
+	@echo "✅ Done. Plugins are in ./bin/"
+
+clean:
+	rm -rf bin/
+	@echo "✅ Cleaned build artifacts"
