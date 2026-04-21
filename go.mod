@@ -1,6 +1,6 @@
 module github.com/gotedo/glauth-postgres-argon2
 
-go 1.18
+go 1.26.2
 
 require (
 	github.com/GeertJohan/yubigo v0.0.0-20190917122436-175bc097e60e
