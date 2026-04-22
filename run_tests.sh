@@ -101,6 +101,9 @@ INSERT INTO glauth.ldapgroups (id, name, gidnumber) VALUES (500, 'GlobalUsers', 
 
 INSERT INTO glauth.users (id, uidnumber, name, mail, givenname, sn, passbcrypt, primarygroup)
 VALUES (1, 1, 'testuser', 'testuser@gotedo.com', 'Test', 'User', '$ARGON2_HASH', 500);
+
+-- Grant testuser the capability to search the base DN
+INSERT INTO glauth.capabilities (userid, action, object) VALUES (1, 'search', 'dc=gotedo,dc=com');
 EOF
 
 # GLAuth Config (unchanged except plugin name is now correct via copy)
