@@ -29,38 +29,52 @@ cd "$TEST_DIR"
 npm init -y >/dev/null 2>&1
 npm install phc-argon2 >/dev/null 2>&1
 
-TEST_PASSWORD="TestPassword123!"
+export TEST_PASSWORD="TestPassword123!"
 
 # Reliable async capture
-ARGON2_HASH=$(node -e '
+RAW_HASH=$(node -e '
   const argon2 = require("phc-argon2");
   (async () => {
-    const hash = await argon2.hash("'"$TEST_PASSWORD"'");
-    console.log(hash);
+    // Node reads directly from the environment, no shell escaping needed
+    const hash = await argon2.hash(process.env.TEST_PASSWORD);
+    process.stdout.write(hash);
   })();
 ')
 
-echo "✅ Hash generated: $ARGON2_HASH"
+# Swap t= and m= order to satisfy the strict Go argon2id parser
+# Matches '$...$t=3,m=4096,p=1$...' and turns it into '$...$m=4096,t=3,p=1$...'
+ARGON2_HASH=$(echo "$RAW_HASH" | sed 's/t=\([0-9]*\),m=\([0-9]*\)/m=\2,t=\1/')
+
+echo "✅ Hash generated and formatted: $ARGON2_HASH"
+
 cd ..
 
 # ====================== 4. Generate Test Files ======================
 echo "🔧 Generating test configurations..."
 
 # SQL Init Script (fixed table names + minimal schema)
+# SQL Init Script
 cat <<EOF > "$TEST_DIR/init-test.sql"
 CREATE SCHEMA IF NOT EXISTS glauth;
 
 CREATE TABLE IF NOT EXISTS glauth.users (
     id SERIAL PRIMARY KEY,
-    uidnumber INTEGER NOT NULL,
     name TEXT NOT NULL,
-    mail TEXT,
-    givenname TEXT,
-    sn TEXT,
-    disabled SMALLINT DEFAULT 0,
-    passbcrypt TEXT,
+    uidnumber INTEGER NOT NULL,
     primarygroup INTEGER NOT NULL,
-    othergroups TEXT DEFAULT ''
+    othergroups TEXT DEFAULT '',
+    givenname TEXT DEFAULT '',
+    sn TEXT DEFAULT '',
+    mail TEXT DEFAULT '',
+    loginshell TEXT DEFAULT '/bin/bash',
+    homedirectory TEXT DEFAULT '',
+    disabled SMALLINT DEFAULT 0,
+    passsha256 TEXT DEFAULT '',
+    passbcrypt TEXT DEFAULT '',
+    otpsecret TEXT DEFAULT '',
+    yubikey TEXT DEFAULT '',
+    sshkeys TEXT DEFAULT '',
+    custattr TEXT DEFAULT '{}'
 );
 
 CREATE TABLE IF NOT EXISTS glauth.ldapgroups (
@@ -70,8 +84,16 @@ CREATE TABLE IF NOT EXISTS glauth.ldapgroups (
 );
 
 CREATE TABLE IF NOT EXISTS glauth.includegroups (
+    id SERIAL PRIMARY KEY,
     parentgroupid INTEGER NOT NULL,
     includegroupid INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS glauth.capabilities (
+    id SERIAL PRIMARY KEY,
+    userid INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    object TEXT NOT NULL
 );
 
 -- Seed test data
