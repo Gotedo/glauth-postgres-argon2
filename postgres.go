@@ -57,7 +57,9 @@ func (h *Argon2PostgresHandler) Bind(bindDN, bindSimplePw string, conn net.Conn)
 	}
 
 	if username == "" {
-		return ldap.LDAPResultInvalidCredentials, fmt.Errorf("invalid DN format")
+		h.log.Error().Msg("username is empty. Yielding to upstream helper...")
+		// Yield to the upstream helper for other checks like anonymous log-in.
+		return h.ldohelper.Bind(ctx, h, bindDN, bindSimplePw, conn)
 	}
 
 	// h.debugDumpUsers(ctx)
@@ -72,6 +74,7 @@ func (h *Argon2PostgresHandler) Bind(bindDN, bindSimplePw string, conn net.Conn)
 		if err == sql.ErrNoRows {
 			h.log.Err(err).Msg(fmt.Sprintf("User %s not found in DB", username))
 		}
+		h.log.Err(err).Str("username", username).Msg("Err while verifying user in DB")
 		// Yield to the upstream helper
 		return h.ldohelper.Bind(ctx, h, bindDN, bindSimplePw, conn)
 	}
