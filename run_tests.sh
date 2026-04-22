@@ -2,11 +2,14 @@
 set -euo pipefail
 
 # ====================== 1. Dependency Checks ======================
-for cmd in docker docker-compose ldapsearch node npm make; do
+for cmd in docker docker-compose ldapsearch ldapadd ldapmodify ldapdelete node npm make; do
   case $cmd in
     docker)           msg="docker" ;;
     docker-compose)   msg="docker-compose or docker compose" ;;
     ldapsearch)       msg="ldap-utils (Debian/Ubuntu) or openldap (macOS)" ;;
+    ldapadd)          msg="ldap-utils (Debian/Ubuntu) or openldap (macOS)" ;;
+    ldapmodify)       msg="ldap-utils (Debian/Ubuntu) or openldap (macOS)" ;;
+    ldapdelete)       msg="ldap-utils (Debian/Ubuntu) or openldap (macOS)" ;;
     node)             msg="nodejs" ;;
     npm)              msg="npm" ;;
     make)             msg="make" ;;
@@ -162,6 +165,21 @@ services:
       - ./glauth-test.cfg:/app/config/glauth.cfg:ro
 EOF
 
+# Create dummy LDIF files for Adder/Modifier tests
+cat <<EOF > "$TEST_DIR/add.ldif"
+dn: cn=newuser,dc=gotedo,dc=com
+objectClass: posixAccount
+cn: newuser
+uidNumber: 999
+EOF
+
+cat <<EOF > "$TEST_DIR/modify.ldif"
+dn: cn=testuser,dc=gotedo,dc=com
+changetype: modify
+replace: mail
+mail: changed@gotedo.com
+EOF
+
 # ====================== 5. Spin up the test environment ======================
 echo "🚀 Starting test containers..."
 docker-compose -f "$TEST_DIR/docker-compose.test.yml" up -d --build
@@ -177,7 +195,7 @@ TESTS_PASSED=0
 TESTS_FAILED=0
 
 # Test A: Valid Authentication
-echo -n "Test A: Valid Authentication ... "
+echo -n "Test A: Valid Authentication & Search ... "
 if ldapsearch -H ldap://localhost:3893 -D "cn=testuser,dc=gotedo,dc=com" -w "$TEST_PASSWORD" -b "dc=gotedo,dc=com" "(cn=testuser)" > /dev/null 2>&1; then
     echo "✅ PASSED"
     ((TESTS_PASSED++))
@@ -203,6 +221,41 @@ if ! ldapsearch -H ldap://localhost:3893 -D "cn=ghostuser,dc=gotedo,dc=com" -w "
     ((TESTS_PASSED++))
 else
     echo "❌ FAILED (It allowed a non-existent user!)"
+    ((TESTS_FAILED++))
+fi
+
+# Test D: Adder (Assert Insufficient Access)
+echo -n "Test D: Adder (Assert Insufficient Access) ... "
+# Using shell input redirection '<' instead of '-f' flag
+ldapadd -H ldap://localhost:3893 -D "cn=testuser,dc=gotedo,dc=com" -w "$TEST_PASSWORD" < "$TEST_DIR/add.ldif" > "$TEST_DIR/test_output_add.log" 2>&1 || true
+if grep -q -i "Insufficient access" "$TEST_DIR/test_output_add.log"; then
+    echo "✅ PASSED"
+    ((TESTS_PASSED++))
+else
+    echo "❌ FAILED (Did not receive Insufficient Access. Output: $(cat "$TEST_DIR/test_output_add.log"))"
+    ((TESTS_FAILED++))
+fi
+
+# Test E: Modifier (Assert Insufficient Access)
+echo -n "Test E: Modifier (Assert Insufficient Access) ... "
+# Using shell input redirection '<' instead of '-f' flag
+ldapmodify -H ldap://localhost:3893 -D "cn=testuser,dc=gotedo,dc=com" -w "$TEST_PASSWORD" < "$TEST_DIR/modify.ldif" > "$TEST_DIR/test_output_modify.log" 2>&1 || true
+if grep -q -i "Insufficient access" "$TEST_DIR/test_output_modify.log"; then
+    echo "✅ PASSED"
+    ((TESTS_PASSED++))
+else
+    echo "❌ FAILED (Did not receive Insufficient Access. Output: $(cat "$TEST_DIR/test_output_modify.log"))"
+    ((TESTS_FAILED++))
+fi
+
+# Test F: Deleter (Assert Insufficient Access)
+echo -n "Test F: Deleter (Assert Insufficient Access) ... "
+ldapdelete -H ldap://localhost:3893 -D "cn=testuser,dc=gotedo,dc=com" -w "$TEST_PASSWORD" "cn=ghostuser,dc=gotedo,dc=com" > "$TEST_DIR/test_output_delete.log" 2>&1 || true
+if grep -q -i "Insufficient access" "$TEST_DIR/test_output_delete.log"; then
+    echo "✅ PASSED"
+    ((TESTS_PASSED++))
+else
+    echo "❌ FAILED (Did not receive Insufficient Access. Output: $(cat "$TEST_DIR/test_output_delete.log"))"
     ((TESTS_FAILED++))
 fi
 

@@ -60,7 +60,7 @@ func (h *Argon2PostgresHandler) Bind(bindDN, bindSimplePw string, conn net.Conn)
 		return ldap.LDAPResultInvalidCredentials, fmt.Errorf("invalid DN format")
 	}
 
-	h.debugDumpUsers(ctx)
+	// h.debugDumpUsers(ctx)
 
 	var dbHash string
 	err := h.db.QueryRowContext(ctx, `
@@ -108,7 +108,7 @@ func (h *Argon2PostgresHandler) FindUser(ctx context.Context, userName string, s
 	ctx, span := h.tracer.Start(ctx, "plugins.argon2_postgres.FindUser")
 	defer span.End()
 
-	h.debugDumpUsers(ctx)
+	// h.debugDumpUsers(ctx)
 
 	var criterion string
 	if searchByUPN {
@@ -727,23 +727,23 @@ func NewPostgresHandler(opts ...handler.Option) handler.Handler {
 }
 
 // Helper to inspect the table state during tests
-func (h *Argon2PostgresHandler) debugDumpUsers(ctx context.Context) {
-	rows, err := h.db.QueryContext(ctx, "SELECT name, mail, passbcrypt FROM users")
-	if err != nil {
-		h.log.Debug().Err(err).Msg("DEBUG DUMP: Failed to query users table")
-		return
-	}
-	defer rows.Close()
+// func (h *Argon2PostgresHandler) debugDumpUsers(ctx context.Context) {
+// 	rows, err := h.db.QueryContext(ctx, "SELECT name, mail, passbcrypt FROM users")
+// 	if err != nil {
+// 		h.log.Debug().Err(err).Msg("DEBUG DUMP: Failed to query users table")
+// 		return
+// 	}
+// 	defer rows.Close()
 
-	h.log.Debug().Msg("--- DEBUG DUMP: Current Users in DB ---")
-	for rows.Next() {
-		var name, mail, hash string
-		if err := rows.Scan(&name, &mail, &hash); err == nil {
-			h.log.Debug().Msg(fmt.Sprintf("User: %s | Mail: %s | Hash: %.15s...", name, mail, hash))
-		}
-	}
-	h.log.Debug().Msg("--- END DEBUG DUMP ---")
-}
+// 	h.log.Debug().Msg("--- DEBUG DUMP: Current Users in DB ---")
+// 	for rows.Next() {
+// 		var name, mail, hash string
+// 		if err := rows.Scan(&name, &mail, &hash); err == nil {
+// 			h.log.Debug().Msg(fmt.Sprintf("User: %s | Mail: %s | Hash: %.15s...", name, mail, hash))
+// 		}
+// 	}
+// 	h.log.Debug().Msg("--- END DEBUG DUMP ---")
+// }
 
 func (b PostgresBackend) GetDriverName() string {
 	return "postgres"
