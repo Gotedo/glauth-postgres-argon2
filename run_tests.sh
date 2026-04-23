@@ -34,6 +34,13 @@ npm install phc-argon2 >/dev/null 2>&1
 
 export TEST_PASSWORD="TestPassword123!"
 
+# User 1: The "Service Account"
+SERVICE_USER="testuser@gotedo.com"
+BIND_DN="cn=${SERVICE_USER},dc=gotedo,dc=com"
+
+# User 2: The "Employ Account"
+TARGET_USER="testuser2@gotedo.com"
+
 # Reliable async capture
 RAW_HASH=$(node -e '
   const argon2 = require("phc-argon2");
@@ -103,10 +110,19 @@ CREATE TABLE IF NOT EXISTS glauth.capabilities (
 INSERT INTO glauth.ldapgroups (id, name, gidnumber) VALUES (500, 'GlobalUsers', 500);
 
 INSERT INTO glauth.users (id, uidnumber, name, mail, givenname, sn, passbcrypt, primarygroup)
-VALUES (1, 1, 'testuser', 'testuser@gotedo.com', 'Test', 'User', '$ARGON2_HASH', 500);
+VALUES (1, 1, 'testuser', 'simpletestuser@gotedo.com', 'Test', 'User', '$ARGON2_HASH', 500);
+
+INSERT INTO glauth.users (id, uidnumber, name, mail, givenname, sn, passbcrypt, primarygroup)
+VALUES (2, 2, '${SERVICE_USER}', '${SERVICE_USER}', 'Test', 'User', '$ARGON2_HASH', 500);
+
+-- Seeding with Email as Name to match Real-World login behaviour
+INSERT INTO glauth.users (id, uidnumber, name, mail, givenname, sn, passbcrypt, primarygroup)
+VALUES (3, 3, '${TARGET_USER}', '${TARGET_USER}', 'Test2', 'User2', '$ARGON2_HASH', 500);
 
 -- Grant testuser the capability to search the base DN
 INSERT INTO glauth.capabilities (userid, action, object) VALUES (1, 'search', 'dc=gotedo,dc=com');
+INSERT INTO glauth.capabilities (userid, action, object) VALUES (2, 'search', 'dc=gotedo,dc=com');
+INSERT INTO glauth.capabilities (userid, action, object) VALUES (3, 'search', 'dc=gotedo,dc=com');
 EOF
 
 # GLAuth Config (unchanged except plugin name is now correct via copy)
@@ -259,6 +275,26 @@ else
     ((TESTS_FAILED++))
 fi
 
+# Test G: Production-Style Simulation
+echo -n "Test G: Production-style Email Bind & Search ... "
+SEARCH_OUT=$(ldapsearch -v -H ldap://localhost:3893 \
+  -D "$BIND_DN" \
+  -w "$TEST_PASSWORD" \
+  -b "dc=gotedo,dc=com" \
+  "(cn=${TARGET_USER})" 2>&1 || true)
+
+if echo "$SEARCH_OUT" | grep -q "numEntries: 1"; then
+    echo "✅ PASSED"
+    ((TESTS_PASSED++))
+else
+    echo "❌ FAILED"
+    echo "----------------------------------------"
+    echo "DEBUG: Raw Search Output follows:"
+    echo "$SEARCH_OUT"
+    echo "----------------------------------------"
+    ((TESTS_FAILED++))
+fi
+
 echo "----------------------------------------"
 echo "📊 RESULTS: $TESTS_PASSED Passed, $TESTS_FAILED Failed"
 echo "----------------------------------------"
@@ -273,8 +309,12 @@ if [ "$TESTS_FAILED" -ne 0 ]; then
     docker-compose -f "$TEST_DIR/docker-compose.test.yml" down -v --remove-orphans
     exit 1
 else
+    echo "🎉 All tests passed successfully!"
+    echo "Dumping GLAuth logs for inspection:"
+    echo "----------------------------------------"
+    docker-compose -f "$TEST_DIR/docker-compose.test.yml" logs glauth
+    echo "----------------------------------------"
     echo "🧹 Cleaning up test environment..."
     docker-compose -f "$TEST_DIR/docker-compose.test.yml" down -v --remove-orphans
-    echo "🎉 All tests passed successfully!"
     exit 0
 fi
